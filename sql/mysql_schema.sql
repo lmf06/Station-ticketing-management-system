@@ -1,0 +1,184 @@
+CREATE DATABASE IF NOT EXISTS station_ticketing
+  DEFAULT CHARACTER SET utf8mb4
+  DEFAULT COLLATE utf8mb4_0900_ai_ci;
+
+USE station_ticketing;
+
+SET FOREIGN_KEY_CHECKS = 0;
+DROP TABLE IF EXISTS ticket_operations;
+DROP TABLE IF EXISTS tickets;
+DROP TABLE IF EXISTS orders;
+DROP TABLE IF EXISTS fare_rules;
+DROP TABLE IF EXISTS trips;
+DROP TABLE IF EXISTS seats;
+DROP TABLE IF EXISTS vehicles;
+DROP TABLE IF EXISTS route_stops;
+DROP TABLE IF EXISTS routes;
+DROP TABLE IF EXISTS stations;
+DROP TABLE IF EXISTS passenger_profiles;
+DROP TABLE IF EXISTS users;
+SET FOREIGN_KEY_CHECKS = 1;
+
+CREATE TABLE users (
+  id INT AUTO_INCREMENT PRIMARY KEY,
+  username VARCHAR(64) NOT NULL UNIQUE,
+  password_hash VARCHAR(255) NOT NULL,
+  role VARCHAR(20) NOT NULL DEFAULT 'PASSENGER',
+  display_name VARCHAR(80) NOT NULL,
+  phone VARCHAR(20),
+  is_active_flag BOOLEAN NOT NULL DEFAULT TRUE,
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  CONSTRAINT ck_users_role CHECK (role IN ('PASSENGER', 'STAFF', 'ADMIN')),
+  INDEX ix_users_role (role)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+CREATE TABLE passenger_profiles (
+  id INT AUTO_INCREMENT PRIMARY KEY,
+  user_id INT NOT NULL UNIQUE,
+  real_name VARCHAR(80) NOT NULL,
+  id_card VARCHAR(32) NOT NULL,
+  contact_phone VARCHAR(20) NOT NULL,
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  CONSTRAINT fk_passenger_profiles_user FOREIGN KEY (user_id) REFERENCES users(id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+CREATE TABLE stations (
+  id INT AUTO_INCREMENT PRIMARY KEY,
+  name VARCHAR(80) NOT NULL UNIQUE,
+  city VARCHAR(80) NOT NULL,
+  address VARCHAR(200) NOT NULL,
+  is_active BOOLEAN NOT NULL DEFAULT TRUE,
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+CREATE TABLE routes (
+  id INT AUTO_INCREMENT PRIMARY KEY,
+  code VARCHAR(32) NOT NULL UNIQUE,
+  name VARCHAR(120) NOT NULL,
+  origin_station_id INT NOT NULL,
+  destination_station_id INT NOT NULL,
+  distance_km DECIMAL(8,2) NOT NULL,
+  is_active BOOLEAN NOT NULL DEFAULT TRUE,
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  CONSTRAINT fk_routes_origin FOREIGN KEY (origin_station_id) REFERENCES stations(id),
+  CONSTRAINT fk_routes_destination FOREIGN KEY (destination_station_id) REFERENCES stations(id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+CREATE TABLE route_stops (
+  id INT AUTO_INCREMENT PRIMARY KEY,
+  route_id INT NOT NULL,
+  station_id INT NOT NULL,
+  stop_order INT NOT NULL,
+  planned_offset_minutes INT NOT NULL DEFAULT 0,
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  CONSTRAINT fk_route_stops_route FOREIGN KEY (route_id) REFERENCES routes(id),
+  CONSTRAINT fk_route_stops_station FOREIGN KEY (station_id) REFERENCES stations(id),
+  UNIQUE KEY uq_route_stop_order (route_id, stop_order)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+CREATE TABLE vehicles (
+  id INT AUTO_INCREMENT PRIMARY KEY,
+  plate_number VARCHAR(20) NOT NULL UNIQUE,
+  model VARCHAR(80) NOT NULL,
+  seat_count INT NOT NULL,
+  status VARCHAR(20) NOT NULL DEFAULT 'ACTIVE',
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  CONSTRAINT ck_vehicle_seat_count CHECK (seat_count > 0),
+  CONSTRAINT ck_vehicle_status CHECK (status IN ('ACTIVE', 'MAINTENANCE', 'RETIRED'))
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+CREATE TABLE seats (
+  id INT AUTO_INCREMENT PRIMARY KEY,
+  vehicle_id INT NOT NULL,
+  seat_number VARCHAR(12) NOT NULL,
+  seat_type VARCHAR(20) NOT NULL DEFAULT 'STANDARD',
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  CONSTRAINT fk_seats_vehicle FOREIGN KEY (vehicle_id) REFERENCES vehicles(id),
+  UNIQUE KEY uq_vehicle_seat_number (vehicle_id, seat_number)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+CREATE TABLE trips (
+  id INT AUTO_INCREMENT PRIMARY KEY,
+  route_id INT NOT NULL,
+  vehicle_id INT NOT NULL,
+  departure_time DATETIME NOT NULL,
+  arrival_time DATETIME NOT NULL,
+  base_fare DECIMAL(10,2) NOT NULL,
+  status VARCHAR(20) NOT NULL DEFAULT 'OPEN',
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  CONSTRAINT fk_trips_route FOREIGN KEY (route_id) REFERENCES routes(id),
+  CONSTRAINT fk_trips_vehicle FOREIGN KEY (vehicle_id) REFERENCES vehicles(id),
+  CONSTRAINT ck_trip_status CHECK (status IN ('OPEN', 'CLOSED', 'CANCELLED')),
+  INDEX ix_trips_departure_time (departure_time),
+  INDEX ix_trips_route_departure (route_id, departure_time)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+CREATE TABLE fare_rules (
+  id INT AUTO_INCREMENT PRIMARY KEY,
+  name VARCHAR(100) NOT NULL,
+  start_date DATE NOT NULL,
+  end_date DATE NOT NULL,
+  multiplier DECIMAL(5,2) NOT NULL DEFAULT 1.00,
+  priority INT NOT NULL DEFAULT 0,
+  is_active BOOLEAN NOT NULL DEFAULT TRUE,
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  CONSTRAINT ck_fare_rule_multiplier CHECK (multiplier > 0),
+  INDEX ix_fare_rules_date_range (start_date, end_date, priority)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+CREATE TABLE orders (
+  id INT AUTO_INCREMENT PRIMARY KEY,
+  order_no VARCHAR(32) NOT NULL UNIQUE,
+  user_id INT NOT NULL,
+  total_amount DECIMAL(10,2) NOT NULL,
+  status VARCHAR(20) NOT NULL DEFAULT 'PAID',
+  paid_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  CONSTRAINT fk_orders_user FOREIGN KEY (user_id) REFERENCES users(id),
+  CONSTRAINT ck_order_status CHECK (status IN ('PAID', 'REFUNDED', 'PARTIAL_REFUND')),
+  INDEX ix_orders_user_status (user_id, status)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+CREATE TABLE tickets (
+  id INT AUTO_INCREMENT PRIMARY KEY,
+  ticket_no VARCHAR(32) NOT NULL UNIQUE,
+  order_id INT NOT NULL,
+  trip_id INT NOT NULL,
+  passenger_name VARCHAR(80) NOT NULL,
+  passenger_id_card VARCHAR(32) NOT NULL,
+  seat_number VARCHAR(12) NOT NULL,
+  fare DECIMAL(10,2) NOT NULL,
+  status VARCHAR(20) NOT NULL DEFAULT 'ACTIVE',
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  CONSTRAINT fk_tickets_order FOREIGN KEY (order_id) REFERENCES orders(id),
+  CONSTRAINT fk_tickets_trip FOREIGN KEY (trip_id) REFERENCES trips(id),
+  CONSTRAINT ck_ticket_status CHECK (status IN ('ACTIVE', 'REFUNDED', 'EXCHANGED')),
+  INDEX ix_tickets_trip_status (trip_id, status),
+  INDEX ix_tickets_order (order_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+CREATE TABLE ticket_operations (
+  id INT AUTO_INCREMENT PRIMARY KEY,
+  ticket_id INT NOT NULL,
+  operator_user_id INT NOT NULL,
+  operation_type VARCHAR(20) NOT NULL,
+  amount_delta DECIMAL(10,2) NOT NULL DEFAULT 0.00,
+  note VARCHAR(255),
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  CONSTRAINT fk_ticket_operations_ticket FOREIGN KEY (ticket_id) REFERENCES tickets(id),
+  CONSTRAINT fk_ticket_operations_operator FOREIGN KEY (operator_user_id) REFERENCES users(id),
+  CONSTRAINT ck_ticket_operation_type CHECK (operation_type IN ('PURCHASE', 'REFUND', 'EXCHANGE_OUT', 'EXCHANGE_IN')),
+  INDEX ix_ticket_operations_ticket (ticket_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
