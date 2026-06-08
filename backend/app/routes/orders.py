@@ -1,17 +1,17 @@
 from __future__ import annotations
 
 from flask import Blueprint
-from flask_login import current_user, login_required
+from flask_login import current_user
 
 from ..models import PassengerProfile
 from ..services import TicketingError, purchase_ticket, serialize_ticket
-from .common import error, json_body, ok, required
+from .common import error, json_body, ok, required, roles_required
 
 bp = Blueprint("orders", __name__, url_prefix="/api")
 
 
 @bp.post("/orders")
-@login_required
+@roles_required("STAFF", "PASSENGER")
 def create_order():
     data = json_body()
     required(data, "tripId")

@@ -5,7 +5,7 @@ from flask_login import current_user, login_required
 
 from ..models import Order, Ticket
 from ..services import TicketingError, exchange_ticket, refund_ticket, serialize_ticket
-from .common import error, json_body, ok, required
+from .common import error, json_body, ok, required, roles_required
 
 bp = Blueprint("tickets", __name__, url_prefix="/api")
 
@@ -21,7 +21,7 @@ def my_tickets():
 
 
 @bp.post("/tickets/<int:ticket_id>/refund")
-@login_required
+@roles_required("STAFF", "PASSENGER")
 def refund(ticket_id: int):
     try:
         ticket = refund_ticket(current_user, ticket_id)
@@ -31,7 +31,7 @@ def refund(ticket_id: int):
 
 
 @bp.post("/tickets/<int:ticket_id>/exchange")
-@login_required
+@roles_required("STAFF", "PASSENGER")
 def exchange(ticket_id: int):
     data = json_body()
     required(data, "newTripId")

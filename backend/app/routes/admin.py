@@ -4,9 +4,10 @@ from datetime import datetime
 from decimal import Decimal
 
 from flask import Blueprint, request
+from flask_login import current_user
 
 from ..extensions import db
-from ..models import FareRule, Route, Seat, Station, Ticket, Trip, User, Vehicle
+from ..models import FareRule, Order, Route, Seat, Station, Ticket, TicketOperation, Trip, User, Vehicle
 from ..services import sales_stats, serialize_ticket, serialize_trip
 from .common import error, json_body, ok, required, roles_required
 
@@ -27,16 +28,62 @@ def update_user(user_id: int):
     if not user:
         return error("NOT_FOUND", "用户不存在。", 404)
     data = json_body()
+    if "username" in data:
+        new_username = data["username"].strip()
+        if len(new_username) < 2 or len(new_username) > 64:
+            return error("VALIDATION_ERROR", "用户名长度应在 2-64 位之间。", 422)
+        if User.query.filter(User.username == new_username, User.id != user_id).first():
+            return error("USERNAME_EXISTS", "用户名已存在。", 409)
+        user.username = new_username
     if "displayName" in data:
         user.display_name = data["displayName"].strip()
     if "phone" in data:
-        user.phone = data["phone"].strip()
+        new_phone = data["phone"].strip()
+        if User.query.filter(User.phone == new_phone, User.id != user_id).first():
+            return error("PHONE_EXISTS", "该手机号已被其他用户使用。", 409)
+        user.phone = new_phone
     if "isActive" in data:
         user.is_active_flag = bool(data["isActive"])
     if "role" in data and data["role"] in {"PASSENGER", "STAFF", "ADMIN"}:
         user.role = data["role"]
     db.session.commit()
     return ok({"user": user.to_dict()})
+
+
+@bp.delete("/users/<int:user_id>")
+@roles_required("ADMIN")
+def delete_user(user_id: int):
+    user = db.session.get(User, user_id)
+    if not user:
+        return error("NOT_FOUND", "用户不存在。", 404)
+    if user.id == current_user.id:
+        return error("CANNOT_DELETE_SELF", "不能删除自己的账号。", 422)
+    if user.role == "ADMIN" and User.query.filter_by(role="ADMIN", is_active_flag=True).count() <= 1:
+        return error("LAST_ADMIN", "不能删除最后一个管理员账号。", 422)
+
+    to_delete = []
+
+    if user.passenger_profile:
+        to_delete.append(user.passenger_profile)
+
+    order_ids = [row[0] for row in db.session.query(Order.id).filter_by(user_id=user.id).all()]
+    if order_ids:
+        ticket_ids = [row[0] for row in db.session.query(Ticket.id).filter(Ticket.order_id.in_(order_ids)).all()]
+        if ticket_ids:
+            ops = TicketOperation.query.filter(TicketOperation.ticket_id.in_(ticket_ids)).all()
+            to_delete.extend(ops)
+            to_delete.extend(Ticket.query.filter(Ticket.id.in_(ticket_ids)).all())
+        to_delete.extend(Order.query.filter(Order.id.in_(order_ids)).all())
+
+    ops = TicketOperation.query.filter_by(operator_user_id=user.id).all()
+    to_delete.extend(ops)
+    to_delete.append(user)
+
+    for obj in to_delete:
+        db.session.delete(obj)
+
+    db.session.commit()
+    return ok({"message": "用户已删除。"})
 
 
 @bp.get("/stations")

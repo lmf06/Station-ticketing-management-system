@@ -1,8 +1,12 @@
 <script setup>
-import { onMounted, reactive, ref } from 'vue'
+import { computed, onMounted, reactive, ref } from 'vue'
 import { Search, ShoppingCart, Refresh, Switch, Close, TrendCharts } from '@element-plus/icons-vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { api, formatDateTime } from '../api'
+import { useAuthStore } from '../stores/auth'
+
+const auth = useAuthStore()
+const isStaff = computed(() => auth.role === 'STAFF')
 
 const stations = ref([])
 const trips = ref([])
@@ -149,7 +153,7 @@ onMounted(async () => {
 
     <section class="panel">
       <div class="panel-header">
-        <h2>窗口售票</h2>
+        <h2>{{ isStaff ? '窗口售票' : '班次概览' }}</h2>
         <el-button :icon="Refresh" @click="refreshAll">刷新</el-button>
       </div>
       <div class="filters">
@@ -175,7 +179,7 @@ onMounted(async () => {
         <el-table-column label="票价" width="90">
           <template #default="{ row }">￥{{ row.fare.toFixed(2) }}</template>
         </el-table-column>
-        <el-table-column label="操作" width="105">
+        <el-table-column v-if="isStaff" label="操作" width="105">
           <template #default="{ row }">
             <el-button type="primary" :icon="ShoppingCart" size="small" :disabled="row.remainingSeats <= 0" @click="openSell(row)">售票</el-button>
           </template>
@@ -185,7 +189,7 @@ onMounted(async () => {
 
     <section class="panel">
       <div class="panel-header">
-        <h2>票务办理</h2>
+        <h2>{{ isStaff ? '票务办理' : '票务记录' }}</h2>
         <el-button :icon="TrendCharts" @click="loadStats">统计</el-button>
       </div>
       <el-table :data="tickets" border>
@@ -197,7 +201,7 @@ onMounted(async () => {
         <el-table-column prop="passengerName" label="乘车人" width="110" />
         <el-table-column prop="seatNumber" label="座位" width="80" />
         <el-table-column prop="status" label="状态" width="110" />
-        <el-table-column label="操作" width="180" fixed="right">
+        <el-table-column v-if="isStaff" label="操作" width="180" fixed="right">
           <template #default="{ row }">
             <div class="table-actions">
               <el-button :icon="Switch" size="small" :disabled="row.status !== 'ACTIVE'" @click="openExchange(row)">换票</el-button>

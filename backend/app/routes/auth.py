@@ -22,6 +22,10 @@ def register():
         return error("VALIDATION_ERROR", "密码长度不能少于 6 位。", 422)
     if User.query.filter_by(username=username).first():
         return error("USERNAME_EXISTS", "用户名已存在。", 409)
+    if User.query.filter_by(phone=data["phone"].strip()).first():
+        return error("PHONE_EXISTS", "该手机号已被注册。", 409)
+    if PassengerProfile.query.filter_by(id_card=data["idCard"].strip()).first():
+        return error("ID_CARD_EXISTS", "该证件号已被注册。", 409)
     user = User(username=username, role="PASSENGER", display_name=data["displayName"].strip(), phone=data["phone"].strip())
     user.set_password(password)
     db.session.add(user)

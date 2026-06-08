@@ -34,6 +34,8 @@ def calculate_trip_fare(trip: Trip) -> Decimal:
 
 
 def remaining_seats(trip: Trip) -> int:
+    if trip.departure_time <= datetime.utcnow():
+        return 0
     sold = Ticket.query.filter_by(trip_id=trip.id, status="ACTIVE").count()
     return max(int(trip.vehicle.seat_count) - sold, 0)
 
@@ -264,7 +266,7 @@ def _allocate_seat(trip: Trip) -> str:
 
 
 def _ensure_ticket_access(user: User, ticket: Ticket) -> None:
-    if user.role in {"ADMIN", "STAFF"}:
+    if user.role == "STAFF":
         return
     if ticket.order.user_id != user.id:
         raise TicketingError("不能操作他人的车票。")

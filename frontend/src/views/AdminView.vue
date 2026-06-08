@@ -1,7 +1,7 @@
 <script setup>
 import { onMounted, reactive, ref } from 'vue'
-import { Plus, Refresh } from '@element-plus/icons-vue'
-import { ElMessage } from 'element-plus'
+import { Plus, Refresh, Edit, Delete } from '@element-plus/icons-vue'
+import { ElMessage, ElMessageBox } from 'element-plus'
 import { api, formatDateTime } from '../api'
 
 const activeTab = ref('stations')
@@ -13,12 +13,15 @@ const fareRules = ref([])
 const users = ref([])
 const stats = ref({})
 const loading = ref(false)
+const userEditDialogOpen = ref(false)
+const editingUser = ref(null)
 
 const stationForm = reactive({ name: '', city: '', address: '' })
 const routeForm = reactive({ code: '', name: '', originStationId: '', destinationStationId: '', distanceKm: '' })
 const vehicleForm = reactive({ plateNumber: '', model: '', seatCount: 45 })
 const tripForm = reactive({ routeId: '', vehicleId: '', departureTime: '', arrivalTime: '', baseFare: '' })
 const fareRuleForm = reactive({ name: '', startDate: '', endDate: '', multiplier: 1.2, priority: 10 })
+const userEditForm = reactive({ username: '', displayName: '', phone: '', role: '', isActive: true })
 
 async function loadAll() {
   loading.value = true
@@ -108,6 +111,42 @@ async function toggleUser(user) {
     await loadAll()
   } catch (error) {
     ElMessage.error(error.message)
+  }
+}
+
+function openEditUser(user) {
+  editingUser.value = user
+  userEditForm.username = user.username
+  userEditForm.displayName = user.displayName
+  userEditForm.phone = user.phone || ''
+  userEditForm.role = user.role
+  userEditForm.isActive = user.isActive
+  userEditDialogOpen.value = true
+}
+
+async function saveUser() {
+  try {
+    await api.patch(`/admin/users/${editingUser.value.id}`, { ...userEditForm })
+    ElMessage.success('用户信息已更新')
+    userEditDialogOpen.value = false
+    await loadAll()
+  } catch (error) {
+    ElMessage.error(error.message)
+  }
+}
+
+async function deleteUser(user) {
+  try {
+    await ElMessageBox.confirm(
+      `确认删除用户「${user.displayName}」（${user.username}）吗？该操作将一并删除其所有订单和车票数据，且不可恢复。`,
+      '删除用户',
+      { type: 'warning', confirmButtonText: '确认删除', cancelButtonText: '取消' },
+    )
+    await api.delete(`/admin/users/${user.id}`)
+    ElMessage.success('用户已删除')
+    await loadAll()
+  } catch (error) {
+    if (error !== 'cancel') ElMessage.error(error.message)
   }
 }
 
@@ -247,14 +286,44 @@ onMounted(loadAll)
             <el-table-column prop="role" label="角色" width="120" />
             <el-table-column prop="phone" label="手机号" />
             <el-table-column prop="isActive" label="启用" width="90" />
-            <el-table-column label="操作" width="120">
+            <el-table-column label="操作" width="210" fixed="right">
               <template #default="{ row }">
-                <el-button size="small" @click="toggleUser(row)">{{ row.isActive ? '停用' : '启用' }}</el-button>
+                <el-button size="small" :icon="Edit" @click="openEditUser(row)">编辑</el-button>
+                <el-button size="small" type="danger" :icon="Delete" @click="deleteUser(row)">删除</el-button>
               </template>
             </el-table-column>
           </el-table>
         </el-tab-pane>
       </el-tabs>
     </section>
+
+    <!-- 编辑用户对话框 -->
+    <el-dialog v-model="userEditDialogOpen" title="编辑用户" width="440">
+      <el-form label-position="top">
+        <el-form-item label="账号">
+          <el-input v-model="userEditForm.username" />
+        </el-form-item>
+        <el-form-item label="姓名">
+          <el-input v-model="userEditForm.displayName" />
+        </el-form-item>
+        <el-form-item label="手机号">
+          <el-input v-model="userEditForm.phone" />
+        </el-form-item>
+        <el-form-item label="角色">
+          <el-select v-model="userEditForm.role" style="width: 100%">
+            <el-option label="旅客" value="PASSENGER" />
+            <el-option label="售票员" value="STAFF" />
+            <el-option label="管理员" value="ADMIN" />
+          </el-select>
+        </el-form-item>
+        <el-form-item label="启用">
+          <el-switch v-model="userEditForm.isActive" />
+        </el-form-item>
+      </el-form>
+      <template #footer>
+        <el-button @click="userEditDialogOpen = false">取消</el-button>
+        <el-button type="primary" @click="saveUser">保存</el-button>
+      </template>
+    </el-dialog>
   </div>
 </template>
