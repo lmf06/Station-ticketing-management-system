@@ -33,7 +33,7 @@ async function logout() {
         </div>
       </div>
       <el-menu :default-active="$route.path" router>
-        <el-menu-item index="/">
+        <el-menu-item v-if="auth.role === 'PASSENGER'" index="/">
           <el-icon><Tickets /></el-icon>
           <span>旅客购票</span>
         </el-menu-item>

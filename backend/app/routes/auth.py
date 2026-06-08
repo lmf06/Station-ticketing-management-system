@@ -14,10 +14,16 @@ bp = Blueprint("auth", __name__, url_prefix="/api/auth")
 def register():
     data = json_body()
     required(data, "username", "password", "displayName", "idCard", "phone")
-    if User.query.filter_by(username=data["username"]).first():
+    username = data["username"].strip()
+    password = data["password"].strip()
+    if len(username) < 2 or len(username) > 64:
+        return error("VALIDATION_ERROR", "用户名长度应在 2-64 位之间。", 422)
+    if len(password) < 6:
+        return error("VALIDATION_ERROR", "密码长度不能少于 6 位。", 422)
+    if User.query.filter_by(username=username).first():
         return error("USERNAME_EXISTS", "用户名已存在。", 409)
-    user = User(username=data["username"].strip(), role="PASSENGER", display_name=data["displayName"].strip(), phone=data["phone"].strip())
-    user.set_password(data["password"])
+    user = User(username=username, role="PASSENGER", display_name=data["displayName"].strip(), phone=data["phone"].strip())
+    user.set_password(password)
     db.session.add(user)
     db.session.flush()
     db.session.add(PassengerProfile(user_id=user.id, real_name=user.display_name, id_card=data["idCard"].strip(), contact_phone=user.phone))

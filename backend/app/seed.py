@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import date, datetime, timedelta
+from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal
 
 from .extensions import db
@@ -48,7 +48,7 @@ def seed_database() -> None:
         for number in range(1, vehicle.seat_count + 1):
             db.session.add(Seat(vehicle_id=vehicle.id, seat_number=str(number), seat_type="STANDARD"))
 
-    today = datetime.utcnow().date()
+    today = datetime.now(timezone.utc).date()
     db.session.add_all(
         [
             Trip(route_id=routes[0].id, vehicle_id=bus_a.id, departure_time=datetime.combine(today + timedelta(days=1), datetime.min.time()).replace(hour=8, minute=30), arrival_time=datetime.combine(today + timedelta(days=1), datetime.min.time()).replace(hour=10, minute=40), base_fare=Decimal("68.00")),

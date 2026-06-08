@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import date, datetime
+from datetime import date, datetime, timezone
 from decimal import Decimal, ROUND_HALF_UP
 from uuid import uuid4
 
@@ -84,6 +84,19 @@ def serialize_ticket(ticket: Ticket) -> dict:
 def purchase_ticket(user: User, trip_id: int, passenger_name: str, passenger_id_card: str) -> Ticket:
     trip = _lock_trip(trip_id)
     _ensure_trip_open(trip)
+
+    existing = (
+        Ticket.query.join(Trip)
+        .filter(
+            Ticket.passenger_id_card == passenger_id_card.strip(),
+            Ticket.trip_id == trip_id,
+            Ticket.status == "ACTIVE",
+        )
+        .first()
+    )
+    if existing:
+        raise TicketingError("该乘客已购买过本班次车票，请勿重复提交。")
+
     seat_number = _allocate_seat(trip)
     fare = calculate_trip_fare(trip)
     order = Order(order_no=_build_no("ORD"), user_id=user.id, total_amount=fare, status="PAID")
@@ -123,6 +136,7 @@ def refund_ticket(operator: User, ticket_id: int) -> Ticket:
     order = ticket.order
     active_count = Ticket.query.filter_by(order_id=order.id, status="ACTIVE").count()
     order.status = "REFUNDED" if active_count == 0 else "PARTIAL_REFUND"
+    order.refunded_at = datetime.now(timezone.utc)
     db.session.add(
         TicketOperation(
             ticket_id=ticket.id,
@@ -148,6 +162,7 @@ def exchange_ticket(operator: User, ticket_id: int, new_trip_id: int) -> Ticket:
     new_seat = _allocate_seat(new_trip)
     old_ticket.status = "EXCHANGED"
     new_fare = calculate_trip_fare(new_trip)
+    fare_diff = new_fare - old_ticket.fare
     new_ticket = Ticket(
         ticket_no=_build_no("TKT"),
         order_id=old_ticket.order_id,
@@ -158,7 +173,8 @@ def exchange_ticket(operator: User, ticket_id: int, new_trip_id: int) -> Ticket:
         fare=new_fare,
         status="ACTIVE",
     )
-    old_ticket.order.total_amount = money(new_fare)
+    order = old_ticket.order
+    order.total_amount = money(order.total_amount + fare_diff)
     db.session.add(new_ticket)
     db.session.flush()
     db.session.add(
@@ -170,13 +186,18 @@ def exchange_ticket(operator: User, ticket_id: int, new_trip_id: int) -> Ticket:
             note=f"换出至班次 {new_trip.id}",
         )
     )
+    exchange_in_note = f"由车票 {old_ticket.ticket_no} 换入"
+    if fare_diff > 0:
+        exchange_in_note += f"，补收差价 {money(fare_diff)} 元"
+    elif fare_diff < 0:
+        exchange_in_note += f"，退还差价 {money(abs(fare_diff))} 元"
     db.session.add(
         TicketOperation(
             ticket_id=new_ticket.id,
             operator_user_id=operator.id,
             operation_type="EXCHANGE_IN",
             amount_delta=new_fare,
-            note=f"由车票 {old_ticket.ticket_no} 换入",
+            note=exchange_in_note,
         )
     )
     db.session.commit()
@@ -250,4 +271,4 @@ def _ensure_ticket_access(user: User, ticket: Ticket) -> None:
 
 
 def _build_no(prefix: str) -> str:
-    return f"{prefix}{datetime.utcnow():%Y%m%d%H%M%S}{uuid4().hex[:8].upper()}"
+    return f"{prefix}{datetime.now(timezone.utc):%Y%m%d%H%M%S}{uuid4().hex[:8].upper()}"

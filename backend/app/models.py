@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import date, datetime
+from datetime import date, datetime, timezone
 from decimal import Decimal
 
 from flask_login import UserMixin
@@ -11,8 +11,13 @@ from .extensions import db
 
 
 class TimestampMixin:
-    created_at = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
-    updated_at = db.Column(db.DateTime, nullable=False, default=datetime.utcnow, onupdate=datetime.utcnow)
+    created_at = db.Column(db.DateTime, nullable=False, default=lambda: datetime.now(timezone.utc))
+    updated_at = db.Column(
+        db.DateTime,
+        nullable=False,
+        default=lambda: datetime.now(timezone.utc),
+        onupdate=lambda: datetime.now(timezone.utc),
+    )
 
 
 class User(UserMixin, TimestampMixin, db.Model):
@@ -208,7 +213,8 @@ class Order(TimestampMixin, db.Model):
     user_id = db.Column(db.Integer, db.ForeignKey("users.id"), nullable=False)
     total_amount = db.Column(db.Numeric(10, 2), nullable=False)
     status = db.Column(db.String(20), nullable=False, default="PAID")
-    paid_at = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
+    paid_at = db.Column(db.DateTime, nullable=False, default=lambda: datetime.now(timezone.utc))
+    refunded_at = db.Column(db.DateTime, nullable=True)
 
     user = db.relationship("User")
 

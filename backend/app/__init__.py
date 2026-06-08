@@ -15,12 +15,27 @@ from .seed import seed_database
 def create_app(config_object: type[Config] | None = None) -> Flask:
     app = Flask(__name__, static_folder=None)
     app.config.from_object(config_object or Config)
+
+    if not app.config.get("SECRET_KEY"):
+        raise RuntimeError(
+            "未设置 SECRET_KEY。请在 .env 文件中配置 SECRET_KEY=xxx 或设置系统环境变量。"
+        )
     app.config["FRONTEND_DIST"] = Path(__file__).resolve().parents[2] / "frontend" / "dist"
 
     db.init_app(app)
     login_manager.init_app(app)
     login_manager.login_view = None
-    CORS(app, supports_credentials=True, resources={r"/api/*": {"origins": app.config["CORS_ORIGINS"]}})
+    CORS(
+        app,
+        supports_credentials=True,
+        resources={
+            r"/api/*": {
+                "origins": app.config["CORS_ORIGINS"],
+                "methods": ["GET", "POST", "PATCH", "DELETE", "OPTIONS"],
+                "allow_headers": ["Content-Type", "Authorization"],
+            }
+        },
+    )
 
     from .routes.admin import bp as admin_bp
     from .routes.auth import bp as auth_bp

@@ -48,6 +48,8 @@ def test_purchase_ticket_allocates_seat_and_reduces_inventory(app):
     with app.app_context():
         user = User.query.filter_by(username="passenger").first()
         trip = Trip.query.first()
+        trip.departure_time = datetime.utcnow() + timedelta(days=1)
+        db.session.commit()
         before = remaining_seats(trip)
 
         ticket = purchase_ticket(user, trip.id, "张三", "330100200001010011")
@@ -63,6 +65,7 @@ def test_purchase_rejects_oversell(app):
         user = User.query.filter_by(username="passenger").first()
         trip = Trip.query.first()
         trip.departure_time = datetime.utcnow() + timedelta(days=1)
+        db.session.commit()
         for index in range(trip.vehicle.seat_count):
             purchase_ticket(user, trip.id, f"乘客{index}", f"33010020000101{index:04d}")
 
@@ -108,3 +111,82 @@ def test_admin_endpoints_require_admin_role(client):
     assert login(client, "admin", "admin123").status_code == 200
     allowed = client.post("/api/admin/stations", json={"name": "测试站", "city": "杭州", "address": "测试地址"})
     assert allowed.status_code == 201
+
+
+def test_staff_cannot_access_admin_only_endpoints(client):
+    assert login(client, "staff", "staff123").status_code == 200
+    response = client.post("/api/admin/stations", json={"name": "测试站", "city": "杭州", "address": "测试地址"})
+    assert response.status_code == 403
+
+
+def test_register_duplicate_username(client):
+    response = client.post(
+        "/api/auth/register",
+        json={"username": "passenger", "password": "test123", "displayName": "测试", "idCard": "330100200001010012", "phone": "13800000003"},
+    )
+    assert response.status_code == 409
+    assert response.json["error"]["code"] == "USERNAME_EXISTS"
+
+
+def test_register_short_password(client):
+    response = client.post(
+        "/api/auth/register",
+        json={"username": "newuser", "password": "12", "displayName": "测试", "idCard": "330100200001010012", "phone": "13800000003"},
+    )
+    assert response.status_code == 422
+
+
+def test_disabled_user_cannot_login(client, app):
+    with app.app_context():
+        user = User.query.filter_by(username="passenger").first()
+        user.is_active_flag = False
+        db.session.commit()
+    response = login(client, "passenger", "passenger123")
+    assert response.status_code == 403
+    with app.app_context():
+        user = User.query.filter_by(username="passenger").first()
+        user.is_active_flag = True
+        db.session.commit()
+
+
+def test_exchange_records_fare_diff(client, app):
+    assert login(client, "passenger", "passenger123").status_code == 200
+    trips = client.get("/api/trips").json["data"]
+    cheaper_trip = next((t for t in trips if float(t["fare"]) < 40), trips[0])
+    expensive_trip = next((t for t in trips if float(t["fare"]) > 60 and t["id"] != cheaper_trip["id"]), trips[0])
+    ticket = client.post("/api/orders", json={"tripId": cheaper_trip["id"]}).json["ticket"]
+    response = client.post(f"/api/tickets/{ticket['id']}/exchange", json={"newTripId": expensive_trip["id"]})
+    assert response.status_code == 201
+
+    with app.app_context():
+        from app.models import TicketOperation
+        ops = (
+            TicketOperation.query
+            .filter(TicketOperation.ticket_id == response.json["ticket"]["id"])
+            .order_by(TicketOperation.id.desc())
+            .first()
+        )
+        assert ops is not None
+        assert "差价" in (ops.note or "")
+
+
+def test_duplicate_passenger_blocked(client, app):
+    assert login(client, "passenger", "passenger123").status_code == 200
+    trips = client.get("/api/trips").json["data"]
+    trip_id = trips[0]["id"]
+    resp1 = client.post("/api/orders", json={"tripId": trip_id, "passengerName": "重复测试", "passengerIdCard": "330100200001019999"})
+    assert resp1.status_code == 201
+    resp2 = client.post("/api/orders", json={"tripId": trip_id, "passengerName": "重复测试", "passengerIdCard": "330100200001019999"})
+    assert resp2.status_code == 422
+    assert "重复" in resp2.json["error"]["message"]
+
+
+def test_after_refund_seat_can_be_reassigned(client, app):
+    assert login(client, "passenger", "passenger123").status_code == 200
+    trips = client.get("/api/trips").json["data"]
+    trip_id = trips[0]["id"]
+    ticket1 = client.post("/api/orders", json={"tripId": trip_id, "passengerName": "乘客A", "passengerIdCard": "33010020000101A001"}).json["ticket"]
+    seat1 = ticket1["seatNumber"]
+    client.post(f"/api/tickets/{ticket1['id']}/refund")
+    ticket2 = client.post("/api/orders", json={"tripId": trip_id, "passengerName": "乘客B", "passengerIdCard": "33010020000101B002"}).json["ticket"]
+    assert ticket2["seatNumber"] == seat1

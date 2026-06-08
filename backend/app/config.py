@@ -11,7 +11,7 @@ BASE_DIR = Path(__file__).resolve().parents[1]
 
 
 class Config:
-    SECRET_KEY = os.getenv("SECRET_KEY", "dev-secret-change-me")
+    SECRET_KEY = os.getenv("SECRET_KEY")
     SQLALCHEMY_DATABASE_URI = os.getenv(
         "DATABASE_URL",
         "mysql+pymysql://station_user:station_pass@127.0.0.1:3306/station_ticketing?charset=utf8mb4",
