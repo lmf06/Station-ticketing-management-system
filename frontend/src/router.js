@@ -1,17 +1,13 @@
 import { createRouter, createWebHistory } from 'vue-router'
 import { useAuthStore } from './stores/auth'
-import LoginView from './views/LoginView.vue'
-import PassengerView from './views/PassengerView.vue'
-import StaffView from './views/StaffView.vue'
-import AdminView from './views/AdminView.vue'
 
 const router = createRouter({
   history: createWebHistory(),
   routes: [
-    { path: '/login', name: 'login', component: LoginView },
-    { path: '/', name: 'passenger', component: PassengerView, meta: { requiresAuth: true, roles: ['PASSENGER'] } },
-    { path: '/staff', name: 'staff', component: StaffView, meta: { requiresAuth: true, roles: ['STAFF', 'ADMIN'] } },
-    { path: '/admin', name: 'admin', component: AdminView, meta: { requiresAuth: true, roles: ['ADMIN'] } },
+    { path: '/login', name: 'login', component: () => import('./views/LoginView.vue') },
+    { path: '/', name: 'passenger', component: () => import('./views/PassengerView.vue'), meta: { requiresAuth: true, roles: ['PASSENGER'] } },
+    { path: '/staff', name: 'staff', component: () => import('./views/StaffView.vue'), meta: { requiresAuth: true, roles: ['STAFF', 'ADMIN'] } },
+    { path: '/admin', name: 'admin', component: () => import('./views/AdminView.vue'), meta: { requiresAuth: true, roles: ['ADMIN'] } },
   ],
 })
 

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 
 import pytest
@@ -48,7 +48,7 @@ def test_purchase_ticket_allocates_seat_and_reduces_inventory(app):
     with app.app_context():
         user = User.query.filter_by(username="passenger").first()
         trip = Trip.query.first()
-        trip.departure_time = datetime.utcnow() + timedelta(days=1)
+        trip.departure_time = datetime.now(timezone.utc).replace(tzinfo=None) + timedelta(days=1)
         db.session.commit()
         before = remaining_seats(trip)
 
@@ -64,7 +64,7 @@ def test_purchase_rejects_oversell(app):
     with app.app_context():
         user = User.query.filter_by(username="passenger").first()
         trip = Trip.query.first()
-        trip.departure_time = datetime.utcnow() + timedelta(days=1)
+        trip.departure_time = datetime.now(timezone.utc).replace(tzinfo=None) + timedelta(days=1)
         db.session.commit()
         for index in range(trip.vehicle.seat_count):
             purchase_ticket(user, trip.id, f"乘客{index}", f"33010020000101{index:04d}")

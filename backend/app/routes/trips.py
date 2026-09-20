@@ -1,11 +1,12 @@
 from __future__ import annotations
 
-from datetime import datetime, time
+from datetime import datetime, time, timezone
 
 from flask import Blueprint, request
+from sqlalchemy.orm import joinedload
 
 from ..models import Route, Station, Trip
-from ..services import serialize_trip
+from ..services import serialize_trips
 from .common import ok
 
 bp = Blueprint("trips", __name__, url_prefix="/api")
@@ -19,7 +20,15 @@ def list_stations():
 
 @bp.get("/trips")
 def list_trips():
-    query = Trip.query.join(Route).filter(Trip.status == "OPEN")
+    query = (
+        Trip.query.options(
+            joinedload(Trip.route).joinedload(Route.origin_station),
+            joinedload(Trip.route).joinedload(Route.destination_station),
+            joinedload(Trip.vehicle),
+        )
+        .join(Route)
+        .filter(Trip.status == "OPEN")
+    )
     from_station_id = request.args.get("fromStationId", type=int)
     to_station_id = request.args.get("toStationId", type=int)
     date_text = request.args.get("date")
@@ -31,6 +40,8 @@ def list_trips():
         day = datetime.strptime(date_text, "%Y-%m-%d").date()
         query = query.filter(Trip.departure_time >= datetime.combine(day, time.min), Trip.departure_time <= datetime.combine(day, time.max))
     else:
-        query = query.filter(Trip.departure_time >= datetime.utcnow())
+        query = query.filter(
+            Trip.departure_time >= datetime.now(timezone.utc).replace(tzinfo=None)
+        )
     trips = query.order_by(Trip.departure_time.asc()).all()
-    return ok({"data": [serialize_trip(trip) for trip in trips]})
+    return ok({"data": serialize_trips(trips)})

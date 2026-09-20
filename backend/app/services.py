@@ -29,19 +29,40 @@ def calculate_trip_fare(trip: Trip) -> Decimal:
         .order_by(FareRule.priority.desc(), FareRule.id.desc())
         .first()
     )
+    return _calculate_trip_fare_with_rules(trip, [rule] if rule else [])
+
+
+def _calculate_trip_fare_with_rules(trip: Trip, rules: list[FareRule]) -> Decimal:
+    day = trip.departure_time.date()
+    rule = next((candidate for candidate in rules if candidate.applies_to(day)), None)
     multiplier = Decimal(rule.multiplier) if rule else Decimal("1.00")
     return money(Decimal(trip.base_fare) * multiplier)
 
 
 def remaining_seats(trip: Trip) -> int:
-    if trip.departure_time <= datetime.utcnow():
-        return 0
     sold = Ticket.query.filter_by(trip_id=trip.id, status="ACTIVE").count()
+    return _remaining_seats_from_count(trip, sold)
+
+
+def _remaining_seats_from_count(trip: Trip, sold: int) -> int:
+    if trip.departure_time <= datetime.now(timezone.utc).replace(tzinfo=None):
+        return 0
     return max(int(trip.vehicle.seat_count) - sold, 0)
 
 
-def serialize_trip(trip: Trip) -> dict:
+def serialize_trip(
+    trip: Trip,
+    *,
+    fare: Decimal | None = None,
+    active_ticket_count: int | None = None,
+) -> dict:
     route = trip.route
+    resolved_fare = calculate_trip_fare(trip) if fare is None else fare
+    resolved_remaining_seats = (
+        remaining_seats(trip)
+        if active_ticket_count is None
+        else _remaining_seats_from_count(trip, active_ticket_count)
+    )
     return {
         "id": trip.id,
         "routeId": trip.route_id,
@@ -56,10 +77,42 @@ def serialize_trip(trip: Trip) -> dict:
         "departureTime": trip.departure_time.isoformat(),
         "arrivalTime": trip.arrival_time.isoformat(),
         "baseFare": float(trip.base_fare),
-        "fare": float(calculate_trip_fare(trip)),
-        "remainingSeats": remaining_seats(trip),
+        "fare": float(resolved_fare),
+        "remainingSeats": resolved_remaining_seats,
         "status": trip.status,
     }
+
+
+def serialize_trips(trips: list[Trip]) -> list[dict]:
+    if not trips:
+        return []
+
+    trip_ids = [trip.id for trip in trips]
+    active_ticket_counts = dict(
+        db.session.query(Ticket.trip_id, func.count(Ticket.id))
+        .filter(Ticket.trip_id.in_(trip_ids), Ticket.status == "ACTIVE")
+        .group_by(Ticket.trip_id)
+        .all()
+    )
+    departure_days = [trip.departure_time.date() for trip in trips]
+    fare_rules = (
+        FareRule.query.filter(
+            FareRule.is_active.is_(True),
+            FareRule.start_date <= max(departure_days),
+            FareRule.end_date >= min(departure_days),
+        )
+        .order_by(FareRule.priority.desc(), FareRule.id.desc())
+        .all()
+    )
+
+    return [
+        serialize_trip(
+            trip,
+            fare=_calculate_trip_fare_with_rules(trip, fare_rules),
+            active_ticket_count=int(active_ticket_counts.get(trip.id, 0)),
+        )
+        for trip in trips
+    ]
 
 
 def serialize_ticket(ticket: Ticket) -> dict:
@@ -225,7 +278,7 @@ def sales_stats() -> dict:
 
 def _lock_trip(trip_id: int) -> Trip:
     query = Trip.query.filter_by(id=trip_id)
-    if db.session.bind and db.session.bind.dialect.name != "sqlite":
+    if _supports_for_update(Trip):
         query = query.with_for_update()
     trip = query.first()
     if not trip:
@@ -235,7 +288,7 @@ def _lock_trip(trip_id: int) -> Trip:
 
 def _lock_ticket(ticket_id: int) -> Ticket:
     query = Ticket.query.filter_by(id=ticket_id)
-    if db.session.bind and db.session.bind.dialect.name != "sqlite":
+    if _supports_for_update(Ticket):
         query = query.with_for_update()
     ticket = query.first()
     if not ticket:
@@ -243,10 +296,14 @@ def _lock_ticket(ticket_id: int) -> Ticket:
     return ticket
 
 
+def _supports_for_update(model: type) -> bool:
+    return db.session.get_bind(mapper=model).dialect.name == "mysql"
+
+
 def _ensure_trip_open(trip: Trip) -> None:
     if trip.status != "OPEN":
         raise TicketingError("班次当前不可售票。")
-    if trip.departure_time <= datetime.utcnow():
+    if trip.departure_time <= datetime.now(timezone.utc).replace(tzinfo=None):
         raise TicketingError("已发车班次不可售票。")
 
 

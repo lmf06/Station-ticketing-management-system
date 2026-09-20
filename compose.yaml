@@ -1,0 +1,63 @@
+name: station-ticketing-local
+
+services:
+  db:
+    image: mysql:8.0
+    restart: unless-stopped
+    environment:
+      MYSQL_DATABASE: ${MYSQL_DATABASE:-station_ticketing}
+      MYSQL_USER: ${MYSQL_USER:-station_user}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD:-local_station_password}
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-local_root_password}
+      TZ: Asia/Shanghai
+    command:
+      - --character-set-server=utf8mb4
+      - --collation-server=utf8mb4_unicode_ci
+    volumes:
+      - mysql_data:/var/lib/mysql
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - mysqladmin ping --host=127.0.0.1 --user=root --password=$$MYSQL_ROOT_PASSWORD --silent
+      interval: 5s
+      timeout: 3s
+      retries: 24
+      start_period: 20s
+
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        NODE_IMAGE: node:24-alpine
+        PYTHON_IMAGE: python:3.11-slim
+    restart: unless-stopped
+    init: true
+    working_dir: /app/backend
+    environment:
+      SECRET_KEY: ${SECRET_KEY:-local-docker-secret-change-before-public-use}
+      DATABASE_URL: mysql+pymysql://${MYSQL_USER:-station_user}:${MYSQL_PASSWORD:-local_station_password}@db:3306/${MYSQL_DATABASE:-station_ticketing}?charset=utf8mb4
+      SESSION_COOKIE_SECURE: "0"
+      CORS_ORIGINS: http://127.0.0.1:8000,http://localhost:8000
+      PORT: "8000"
+      WEB_CONCURRENCY: "2"
+      WEB_THREADS: "2"
+      DB_POOL_SIZE: "5"
+      DB_MAX_OVERFLOW: "5"
+      TZ: Asia/Shanghai
+    command:
+      - sh
+      - -c
+      - |
+        set -e
+        flask --app run:app init-db
+        flask --app run:app seed-demo
+        exec gunicorn --config /app/backend/gunicorn.conf.py run:app
+    depends_on:
+      db:
+        condition: service_healthy
+    ports:
+      - "127.0.0.1:8000:8000"
+
+volumes:
+  mysql_data:

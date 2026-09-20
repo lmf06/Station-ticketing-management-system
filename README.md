@@ -16,6 +16,7 @@ backend/              Flask API、模型、服务、路由、测试
 frontend/             Vue 前端
 sql/                  MySQL 建表、种子数据、查询与事务示例
 docs/                 课程设计说明、报告提纲、架构决策
+Dockerfile            前端构建与 Flask/Gunicorn 生产镜像
 ```
 
 ## 演示账号
@@ -32,13 +33,19 @@ docs/                 课程设计说明、报告提纲、架构决策
 
 ```powershell
 python -m venv .venv
-.\.venv\Scripts\python.exe -m pip install -r backend\requirements.txt
+.\.venv\Scripts\python.exe -m pip install -r backend\requirements-dev.txt
 ```
 
-2. 配置 MySQL。先用有权限的 MySQL 账号执行：
+2. 复制环境变量示例并设置随机密钥和本机数据库凭据：
+
+```powershell
+Copy-Item .env.example .env
+```
+
+然后用有权限的 MySQL 账号执行：
 
 ```sql
-CREATE USER IF NOT EXISTS 'station_user'@'localhost' IDENTIFIED BY 'station_pass';
+CREATE USER IF NOT EXISTS 'station_user'@'localhost' IDENTIFIED BY 'replace-with-a-strong-password';
 GRANT ALL PRIVILEGES ON station_ticketing.* TO 'station_user'@'localhost';
 FLUSH PRIVILEGES;
 ```
@@ -46,11 +53,17 @@ FLUSH PRIVILEGES;
 然后导入数据库脚本：
 
 ```powershell
-mysql -uroot -p < sql\mysql_schema.sql
-mysql -uroot -p < sql\mysql_seed.sql
+cmd /c "mysql -uroot -p < sql\mysql_schema.sql"
+cmd /c "mysql -uroot -p < sql\mysql_seed.sql"
 ```
 
-也可以复制 `.env.example` 为 `.env`，把 `DATABASE_URL` 改成本机 MySQL 账号。
+如果数据库由旧版脚本创建且需要保留现有数据，请不要重新执行建表脚本，改为执行一次迁移：
+
+```powershell
+cmd /c "mysql -uroot -p station_ticketing < sql\migrations\001_add_orders_refunded_at.sql"
+```
+
+请确认 `.env` 中的 `DATABASE_URL` 与刚创建的 MySQL 用户一致；应用不会使用代码内置的默认口令。
 
 3. 启动后端：
 
@@ -62,11 +75,29 @@ mysql -uroot -p < sql\mysql_seed.sql
 
 ```powershell
 cd frontend
-npm install
+npm ci
 npm run dev
 ```
 
 访问 `http://127.0.0.1:5173`。
+
+## 本地 Docker 部署
+
+本地阶段可使用 Docker Compose 同时启动网站和 MySQL：
+
+```powershell
+docker compose up --build --detach
+docker compose ps
+```
+
+访问 `http://127.0.0.1:8000`。Compose 会创建持久化 MySQL 数据卷，并在首次启动时导入上方列出的演示账号；数据库端口不会暴露到宿主机。查看日志或停止服务：
+
+```powershell
+docker compose logs --follow app
+docker compose down
+```
+
+`docker compose down` 会保留数据库数据；只有明确需要清空本地数据库时才使用 `docker compose down --volumes`。
 
 ## 验证
 
@@ -77,3 +108,28 @@ npm run build
 ```
 
 当前已覆盖的后端场景：节假日浮动票价、购票占座、余票不足拒绝、退票释放座位、换票生成新票、管理员权限控制、统一错误响应。
+
+## Docker 生产部署
+
+生产镜像会先构建 Vue，再由 Gunicorn 运行 Flask 并从同一域名提供前端和 `/api`。数据库必须使用容器外部的 MySQL 8.x 服务。
+
+```powershell
+docker build --tag station-ticketing:local .
+docker run --rm --env-file .env --publish 8000:8000 station-ticketing:local
+```
+
+首次连接空数据库时，只初始化表结构，不导入公开演示账号：
+
+```powershell
+docker run --rm --env-file .env --workdir /app/backend station-ticketing:local flask --app run:app init-db
+```
+
+公网环境随后通过隐藏密码提示创建首个管理员：
+
+```powershell
+docker run --rm --interactive --tty --env-file .env --workdir /app/backend station-ticketing:local flask --app run:app create-admin --username admin --display-name "系统管理员"
+```
+
+仅本地演示需要执行 `seed-demo`，公网环境不应使用 README 中的演示密码。
+
+部署平台必须配置 `SECRET_KEY`、`DATABASE_URL` 和 `SESSION_COOKIE_SECURE=1`；平台可通过 `PORT` 指定监听端口。存活检查使用 `/healthz`，数据库就绪检查使用 `/readyz`。完整清单见 [生产部署指南](docs/deployment.md)。

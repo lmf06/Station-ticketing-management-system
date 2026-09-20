@@ -5,10 +5,11 @@ from decimal import Decimal
 
 from flask import Blueprint, request
 from flask_login import current_user
+from sqlalchemy.orm import joinedload
 
 from ..extensions import db
 from ..models import FareRule, Order, Route, Seat, Station, Ticket, TicketOperation, Trip, User, Vehicle
-from ..services import sales_stats, serialize_ticket, serialize_trip
+from ..services import sales_stats, serialize_ticket, serialize_trip, serialize_trips
 from .common import error, json_body, ok, required, roles_required
 
 bp = Blueprint("admin", __name__, url_prefix="/api/admin")
@@ -169,8 +170,16 @@ def create_vehicle():
 @bp.get("/trips")
 @roles_required("ADMIN", "STAFF")
 def admin_trips():
-    rows = Trip.query.order_by(Trip.departure_time.desc()).all()
-    return ok({"data": [serialize_trip(row) for row in rows]})
+    rows = (
+        Trip.query.options(
+            joinedload(Trip.route).joinedload(Route.origin_station),
+            joinedload(Trip.route).joinedload(Route.destination_station),
+            joinedload(Trip.vehicle),
+        )
+        .order_by(Trip.departure_time.desc())
+        .all()
+    )
+    return ok({"data": serialize_trips(rows)})
 
 
 @bp.post("/trips")
