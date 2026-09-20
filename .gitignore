@@ -29,3 +29,6 @@ Thumbs.db
 # 缓存
 .pytest_cache/
 .mypy_cache/
+
+# Database backups
+backups/
